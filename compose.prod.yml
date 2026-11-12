@@ -81,7 +81,9 @@ services:
     restart: "no"
     command: >
       /wait-for-it.sh db:5432 --timeout=60 --strict --
-      sh -c "python oura/prepare_oura.py && cp /app/oura/config.toml /oura-data/config.toml"
+      sh -c "python oura/prepare_oura.py
+      && cp /app/oura/config.toml /oura-data/config.toml
+      && if grep -q 'type = \"Point\"' /oura-data/config.toml; then rm -f /oura-data/cursor; fi"
     volumes:
       - oura_data:/oura-data
     depends_on:
