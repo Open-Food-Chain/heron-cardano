@@ -16,7 +16,7 @@ services:
   api:
     <<: *app
     command: >
-      sh -c "/wait-for-it.sh db:5432 --timeout=60 --strict --
+      sh -c "/wait-for-it.sh \"$${POSTGRES_HOST:-db}:$${POSTGRES_PORT:-5432}\" --timeout=60 --strict --
       && alembic upgrade head
       && sleep 2
       && uvicorn heron_app.main:app --host 0.0.0.0 --port 8000"
@@ -39,8 +39,8 @@ services:
   worker:
     <<: *app
     command: >
-      /wait-for-it.sh db:5432 --timeout=60 --strict --
-      sh -c "celery -A heron_app.workers.worker worker -Q default --loglevel=info"
+      sh -c "/wait-for-it.sh \"$${POSTGRES_HOST:-db}:$${POSTGRES_PORT:-5432}\" --timeout=60 --strict --
+      && celery -A heron_app.workers.worker worker -Q default --loglevel=info"
     depends_on:
       - db
       - redis
@@ -57,12 +57,14 @@ services:
     image: postgres:14.19
     restart: unless-stopped
     env_file: ${HERON_ENV_FILE:?set HERON_ENV_FILE to the env file path on the host}
-    environment:
-      POSTGRES_DB: heron_db
+    entrypoint:
+      - sh
+      - -c
+      - export POSTGRES_DB="$${POSTGRES_DB:-heron_db}" && exec docker-entrypoint.sh postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d heron_db"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB:-heron_db}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -80,8 +82,8 @@ services:
     <<: *app
     restart: "no"
     command: >
-      /wait-for-it.sh db:5432 --timeout=60 --strict --
-      sh -c "python oura/prepare_oura.py
+      sh -c "/wait-for-it.sh \"$${POSTGRES_HOST:-db}:$${POSTGRES_PORT:-5432}\" --timeout=60 --strict --
+      && python oura/prepare_oura.py
       && cp /app/oura/config.toml /oura-data/config.toml
       && if grep -q 'type = \"Point\"' /oura-data/config.toml; then rm -f /oura-data/cursor; fi"
     volumes:

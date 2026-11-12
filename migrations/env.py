@@ -1,44 +1,55 @@
 from logging.config import fileConfig
-import os
-from sqlalchemy import engine_from_config, pool # type: ignore
+from sqlalchemy import create_engine, pool, text # type: ignore
 from alembic import context # type: ignore
-from dotenv import load_dotenv
 
+from heron_app.core.config import settings
 from heron_app.db.database import Base
 from heron_app.db.models import wallet, transaction, transaction_output, transaction_output_asset, minting_policies
 
-load_dotenv()
-
 config = context.config
-
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
-
-SQLALCHEMY_DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@db:5432/heron_db"
-
-config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
 
 fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
+SCHEMA = settings.POSTGRES_SCHEMA
+
 
 def run_migrations_offline():
-    url = config.get_main_option("sqlalchemy.url")
+    # The URL goes straight to context.configure: config.set_main_option
+    # would treat the % of an escaped password as configparser interpolation.
+    url = settings.DATABASE_URL.render_as_string(hide_password=False)
     context.configure(
-        url=url, target_metadata=target_metadata, literal_binds=True, dialect_opts={"paramstyle": "named"}
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        version_table_schema=SCHEMA,
     )
 
     with context.begin_transaction():
+        if SCHEMA:
+            context.execute(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"')
+            context.execute(f"SET search_path TO {SCHEMA}")
         context.run_migrations()
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section), prefix="sqlalchemy.", poolclass=pool.NullPool
+    connectable = create_engine(
+        settings.DATABASE_URL,
+        poolclass=pool.NullPool,
+        connect_args=settings.DB_CONNECT_ARGS,
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        if SCHEMA:
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+            connection.commit()
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table_schema=SCHEMA,
+        )
 
         with context.begin_transaction():
             context.run_migrations()
