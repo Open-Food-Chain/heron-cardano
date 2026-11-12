@@ -1,0 +1,111 @@
+# Production compose for one Lightsail host, behind a reverse proxy.
+# Host setup once:   docker network create ofc-proxy
+# Run with:          HERON_ENV_FILE=/path/outside/repo/heron.env docker compose -f compose.prod.yml up -d --build
+# Variable names are listed in .env.example. The dev file is docker-compose.yml.
+name: heron
+
+x-app: &app
+  build: .
+  image: heron-app:prod
+  restart: unless-stopped
+  env_file: ${HERON_ENV_FILE:?set HERON_ENV_FILE to the env file path on the host}
+  environment:
+    PYTHONPATH: /app
+
+services:
+  api:
+    <<: *app
+    command: >
+      sh -c "/wait-for-it.sh db:5432 --timeout=60 --strict --
+      && alembic upgrade head
+      && sleep 2
+      && uvicorn heron_app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      # uvicorn only listens once the migrations are done
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      - db
+      - redis
+    networks:
+      default:
+      ofc-proxy:
+        aliases:
+          - heron-api
+
+  worker:
+    <<: *app
+    command: >
+      /wait-for-it.sh db:5432 --timeout=60 --strict --
+      sh -c "celery -A heron_app.workers.worker worker -Q default --loglevel=info"
+    depends_on:
+      - db
+      - redis
+      - oura
+
+  oura_worker:
+    <<: *app
+    command: celery -A heron_app.workers.oura_listener worker --loglevel=info -n oura_worker
+    depends_on:
+      - redis
+      - oura
+
+  db:
+    image: postgres:14.19
+    restart: unless-stopped
+    env_file: ${HERON_ENV_FILE:?set HERON_ENV_FILE to the env file path on the host}
+    environment:
+      POSTGRES_DB: heron_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d heron_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  # Renders oura's config.toml with the unchanged prepare_oura.py and copies it
+  # into the oura_data volume (mounted at /oura-data here, so the image's own
+  # /app/oura stays intact).
+  init_oura_config:
+    <<: *app
+    restart: "no"
+    command: >
+      /wait-for-it.sh db:5432 --timeout=60 --strict --
+      sh -c "python oura/prepare_oura.py && cp /app/oura/config.toml /oura-data/config.toml"
+    volumes:
+      - oura_data:/oura-data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  oura:
+    image: ghcr.io/txpipe/oura:v1.9.5
+    platform: linux/amd64
+    restart: unless-stopped
+    entrypoint: ["oura", "daemon", "--config", "/app/oura/config.toml"]
+    volumes:
+      - oura_data:/app/oura
+    depends_on:
+      init_oura_config:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+networks:
+  ofc-proxy:
+    external: true
+
+volumes:
+  postgres_data:
+  redis_data:
+  oura_data:
