@@ -1,0 +1,10 @@
+.env*
+!.env.example
+.git
+.github
+.venv
+notes
+oura/cursor
+oura/config.toml
+__pycache__
+*.pyc
