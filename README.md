@@ -46,6 +46,18 @@ cd heron-cardano
 docker-compose up --build -d
 ````
 
+### Database settings (optional)
+Set these in the env file. An empty value counts as unset.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `POSTGRES_HOST` | `db` | Database host (for an external database; the bundled `db` service is `db`) |
+| `POSTGRES_PORT` | `5432` | Database port (the bundled `db` service always listens on 5432) |
+| `POSTGRES_DB` | `heron_db` | Database name |
+| `POSTGRES_SCHEMA` | `public` | Schema for the tables and `alembic_version`; created by the migrations |
+
+The schema may contain letters, digits and underscore and must not start with a digit; anything else stops startup with an error. Changing the schema on a database that already has data does not move that data.
+
 ## Troubleshoot
 
 ### These containers should be up and running

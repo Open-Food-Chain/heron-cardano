@@ -3,12 +3,9 @@ import psycopg2
 import requests
 from jinja2 import Template
 
+from heron_app.core.config import settings
+
 # Configuration
-POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
-
-DB_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@db:5432/heron_db"
-
 BLOCKFROST_API_KEY = os.getenv("BLOCKFROST_PROJECT_ID")
 network =  BLOCKFROST_API_KEY[:7].lower()
 OURA_TEMPLATE_PATH = "/app/oura/config-template.toml"
@@ -16,7 +13,14 @@ OURA_CONFIG_PATH = "/app/oura/config.toml"
 
 
 def get_pending_transaction_hash():
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD,
+        dbname=settings.POSTGRES_DB,
+        **settings.DB_CONNECT_ARGS,
+    )
     cur = conn.cursor()
     cur.execute("""
         SELECT tx_hash FROM transactions
@@ -93,7 +97,7 @@ def main():
 
 
 if __name__ == "__main__":
-    print(f"🔧 DB URL: {DB_URL}")
+    print(f"🔧 DB: host={settings.POSTGRES_HOST} port={settings.POSTGRES_PORT} database={settings.POSTGRES_DB} schema={settings.POSTGRES_SCHEMA or '(default)'}")
     print(f"🌐 Blockfrost Project ID: {BLOCKFROST_API_KEY}")
     print(f"🌐 Cardano network: {network}")
     main()
