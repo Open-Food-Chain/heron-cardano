@@ -32,7 +32,7 @@ class Settings:
 
     # URL object: user and password are escaped when it is rendered.
     DATABASE_URL = URL.create(
-        drivername="postgresql",
+        drivername="postgresql+psycopg2",
         username=POSTGRES_USER,
         password=POSTGRES_PASSWORD,
         host=POSTGRES_HOST,
