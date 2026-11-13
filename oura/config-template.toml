@@ -1,36 +1,36 @@
+# Oura v2 config. v1 never sends N2N keep-alives, so the node drops it every
+# ~97 s and it never syncs; v2 keeps the connection open.
 [source]
 type = "N2N"
-address = ["Tcp", "preprod-node.play.dev.cardano.org:3001"]
-magic = 1
-min_depth = 10
+peers = ["preprod-node.play.dev.cardano.org:3001"]
 
-[source.intersect]
+[chain]
+type = "preprod"
+
+[intersect]
 type = "{{ starting_point_type }}"
 {% if starting_point_type == "Point" %}
 value = [ {{ slot }}, "{{ block_hash }}" ]
 {% endif %}
 
-[source.mapper]
-include_transaction_details = true
+# Hold each block until 10 more are on top of it (v1's min_depth = 10).
+# Must come before SplitBlock: it keeps one record per block.
+[[filters]]
+type = "RollbackBuffer"
+min_depth = 10
+
+# One entry per transaction, as parsed JSON with "hash" in base64.
+[[filters]]
+type = "SplitBlock"
 
 [[filters]]
-type = "Selection"
-
-[filters.check]
-predicate = "variant_in"
-argument = ["Transaction"]
+type = "ParseCbor"
 
 [sink]
 type = "Redis"
-redis_server = "redis://redis:6379/0"
+url = "redis://redis:6379/0"
 stream_name = "oura.events"
-use_raw = true
-
-[sink.log]
-enabled = true
-
-[log]
-level = "debug"
+stream_max_length = 20000
 
 [metrics]
 address = "0.0.0.0:9186"

@@ -93,7 +93,7 @@ services:
         condition: service_healthy
 
   oura:
-    image: ghcr.io/txpipe/oura:v1.9.5
+    image: ghcr.io/txpipe/oura:v2.3.0
     platform: linux/amd64
     restart: unless-stopped
     entrypoint: ["oura", "daemon", "--config", "/app/oura/config.toml"]
