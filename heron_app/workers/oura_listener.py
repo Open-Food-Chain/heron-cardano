@@ -1,4 +1,6 @@
 import json
+import time
+import base64
 import redis
 import logging
 import threading
@@ -18,8 +20,10 @@ logger.addHandler(handler)
 
 logger.propagate = False
 
-# Redis client
-redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+# Redis client. XREAD blocks for up to BLOCK_MS, so the socket timeout must be
+# longer, or a quiet stream raises TimeoutError.
+BLOCK_MS = 5000
+redis_client = redis.Redis(host="redis", port=6379, decode_responses=True, socket_timeout=15)
 stream_name = "oura.events"
 
 # Celery app
@@ -27,12 +31,7 @@ celery = Celery("oura_listener", broker="redis://redis:6379/0")
 
 
 @celery.task
-def handle_oura_event(event):
-    logger.debug(f"Processing Oura Event: {json.dumps(event)[:100]}")
-    tx_hash = event.get("transaction", {}).get("hash")
-    if not tx_hash:
-        return
-
+def handle_oura_event(tx_hash):
     logger.debug(f"✅ Found transaction hash: {tx_hash}")
 
     session = SessionLocal()
@@ -57,31 +56,31 @@ def stream_listener():
     last_id = "0"  # Start from new messages only
     while True:
         try:
-            results = redis_client.xread({stream_name: last_id}, block=5000, count=10)
+            results = redis_client.xread({stream_name: last_id}, block=BLOCK_MS, count=10)
 
             logger.debug(f"Received {len(results)} messages from Redis stream.")
             for stream, messages in results:
                 logger.debug(f"Reading {len(messages)} messages from stream: {stream}")
                 for msg_id, msg_data in messages:
-                    logger.debug(f"Raw message data: {msg_data}")
                     last_id = msg_id
                     raw_event = list(msg_data.values())[0]
                     if raw_event:
                         try:
+                            # Oura v2 ParseCbor record: one transaction, hash in base64
                             event = json.loads(raw_event)
-
-                            if "block" in event:
-                                logger.debug("Skipping block event.")
-                                continue
-                            elif "transaction" in event:
-                                logger.debug("Transaction event received.")
-                                handle_oura_event.delay(event)
+                            tx_hash = event.get("hash")
+                            if tx_hash:
+                                handle_oura_event.delay(base64.b64decode(tx_hash).hex())
                             else:
                                 logger.warning("Unknown event format.")
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"Failed to parse event JSON: {e}")
+                        except ValueError as e:  # bad JSON or bad base64
+                            logger.warning(f"Failed to parse event: {e}")
+        except redis.exceptions.TimeoutError:
+            # An empty poll that outlived the socket timeout; just poll again.
+            logger.debug("Redis stream poll timed out.")
         except Exception as e:
             logger.error(f"Error polling Redis stream: {e}")
+            time.sleep(5)
 
 
 @worker_ready.connect
